@@ -1,15 +1,80 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState } from "react";
 import { MessageBubble } from "./MessageBubble";
 import { Header } from "./Header";
 import ConfirmationModal from "./ConfirmationModal";
+import type { Message } from "ai";
 
 // Tool names that require user confirmation before execution
 const CONFIRMABLE_TOOLS = ["send_transaction", "deploy_erc20"];
 
-export function ChatInterface() {
+interface ChatInterfaceProps {
+    conversationId: string | null;
+}
+
+export function ChatInterface({ conversationId }: ChatInterfaceProps) {
+    const [initialMessages, setInitialMessages] = useState<Message[]>([]);
+    const [loadingHistory, setLoadingHistory] = useState(false);
+
+    // Load message history when conversationId changes
+    useEffect(() => {
+        if (!conversationId) {
+            setInitialMessages([]);
+            return;
+        }
+
+        let cancelled = false;
+        setLoadingHistory(true);
+
+        fetch(`/api/conversations/${conversationId}`)
+            .then((res) => res.json())
+            .then((data) => {
+                if (cancelled) return;
+                const msgs: Message[] = (data.messages ?? []).map(
+                    (m: { id: string; role: string; content: string }) => ({
+                        id: m.id,
+                        role: m.role as "user" | "assistant",
+                        content: m.content,
+                    })
+                );
+                setInitialMessages(msgs);
+            })
+            .catch(() => {
+                if (!cancelled) setInitialMessages([]);
+            })
+            .finally(() => {
+                if (!cancelled) setLoadingHistory(false);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [conversationId]);
+
+    // Key forces useChat to remount when conversation or initial messages change
+    const chatKey = `${conversationId ?? "new"}-${initialMessages.length}`;
+
+    return (
+        <ChatInner
+            key={chatKey}
+            conversationId={conversationId}
+            initialMessages={initialMessages}
+            loadingHistory={loadingHistory}
+        />
+    );
+}
+
+function ChatInner({
+    conversationId,
+    initialMessages,
+    loadingHistory,
+}: {
+    conversationId: string | null;
+    initialMessages: Message[];
+    loadingHistory: boolean;
+}) {
     const {
         messages,
         input,
@@ -18,9 +83,13 @@ export function ChatInterface() {
         isLoading,
         error,
         addToolResult,
-    } = useChat();
+    } = useChat({
+        initialMessages,
+        body: { conversationId },
+    });
 
     const scrollRef = useRef<HTMLDivElement>(null);
+    const inputRef = useRef<HTMLInputElement>(null);
 
     // Auto-scroll to bottom on new messages
     useEffect(() => {
@@ -28,6 +97,13 @@ export function ChatInterface() {
             scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
         }
     }, [messages, isLoading]);
+
+    // Auto-focus input when AI finishes responding
+    useEffect(() => {
+        if (!isLoading && inputRef.current) {
+            inputRef.current.focus();
+        }
+    }, [isLoading]);
 
     // Find pending tool calls that need confirmation
     const pendingToolCall = messages
@@ -75,7 +151,13 @@ export function ChatInterface() {
                 style={{ background: "var(--color-surface)" }}
             >
                 <div className="max-w-3xl mx-auto space-y-4">
-                    {messages.length === 0 && (
+                    {loadingHistory && (
+                        <div className="flex items-center justify-center py-8">
+                            <div className="w-6 h-6 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                        </div>
+                    )}
+
+                    {!loadingHistory && messages.length === 0 && (
                         <div className="flex flex-col items-center justify-center h-full min-h-[50vh] text-center">
                             <div
                                 className="text-5xl mb-4"
@@ -184,6 +266,7 @@ export function ChatInterface() {
                     className="max-w-3xl mx-auto flex items-center gap-2"
                 >
                     <input
+                        ref={inputRef}
                         id="chat-input"
                         type="text"
                         value={input}

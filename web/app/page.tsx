@@ -1,11 +1,30 @@
 "use client";
 
 import { useSession } from "next-auth/react";
+import { useState, useCallback } from "react";
 import { ChatInterface } from "@/components/ChatInterface";
 import { ConnectWallet } from "@/components/ConnectWallet";
+import { Sidebar } from "@/components/Sidebar";
 
 export default function Home() {
     const { data: session, status } = useSession();
+    const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+
+    const handleNewChat = useCallback(async () => {
+        try {
+            const res = await fetch("/api/conversations", { method: "POST" });
+            if (res.ok) {
+                const data = await res.json();
+                setActiveConversationId(data.id);
+            }
+        } catch (err) {
+            console.error("Failed to create conversation", err);
+        }
+    }, []);
+
+    const handleSelectConversation = useCallback((id: string) => {
+        setActiveConversationId(id);
+    }, []);
 
     // Loading state
     if (status === "loading") {
@@ -39,10 +58,17 @@ export default function Home() {
         );
     }
 
-    // Authenticated — show chat
+    // Authenticated — show sidebar + chat
     return (
-        <main className="flex flex-col h-screen">
-            <ChatInterface />
+        <main className="flex h-screen overflow-hidden">
+            <Sidebar
+                activeId={activeConversationId}
+                onSelect={handleSelectConversation}
+                onNewChat={handleNewChat}
+            />
+            <div className="flex-1 flex flex-col min-w-0">
+                <ChatInterface conversationId={activeConversationId} />
+            </div>
         </main>
     );
 }

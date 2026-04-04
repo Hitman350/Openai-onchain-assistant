@@ -1,6 +1,9 @@
 "use client";
 
 import type { Message } from "ai";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import type { Components } from "react-markdown";
 
 // Human-readable tool labels
 const TOOL_LABELS: Record<string, string> = {
@@ -16,39 +19,127 @@ const TOOL_LABELS: Record<string, string> = {
     get_eth_price: "💰 Checked ETH price",
 };
 
-// Simple link detection for explorer URLs
-function formatContent(text: string) {
-    const urlRegex = /(https?:\/\/[^\s]+)/g;
-    const parts = text.split(urlRegex);
-
-    return parts.map((part, i) => {
-        if (urlRegex.test(part)) {
-            urlRegex.lastIndex = 0;
-            const label = part.includes("/tx/")
-                ? "View Transaction ↗"
-                : part.includes("/address/")
-                    ? "View on Explorer ↗"
-                    : "Open Link ↗";
+// Custom markdown components styled for the dark chat theme
+const markdownComponents: Components = {
+    p: ({ children }) => (
+        <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>
+    ),
+    strong: ({ children }) => (
+        <strong className="font-semibold" style={{ color: "var(--color-accent-light)" }}>
+            {children}
+        </strong>
+    ),
+    em: ({ children }) => (
+        <em className="italic" style={{ color: "var(--color-text-secondary)" }}>
+            {children}
+        </em>
+    ),
+    ul: ({ children }) => (
+        <ul className="ml-4 mb-2 last:mb-0 space-y-1 list-none">{children}</ul>
+    ),
+    ol: ({ children }) => (
+        <ol className="ml-4 mb-2 last:mb-0 space-y-1 list-decimal" style={{ color: "var(--color-text-secondary)" }}>
+            {children}
+        </ol>
+    ),
+    li: ({ children }) => (
+        <li className="relative pl-4 before:content-['▸'] before:absolute before:left-0 before:text-[var(--color-accent)] before:text-xs before:top-[3px]">
+            {children}
+        </li>
+    ),
+    h1: ({ children }) => (
+        <h1 className="text-base font-bold mb-2 mt-3 first:mt-0" style={{ color: "var(--color-accent-light)" }}>
+            {children}
+        </h1>
+    ),
+    h2: ({ children }) => (
+        <h2 className="text-sm font-bold mb-1.5 mt-3 first:mt-0" style={{ color: "var(--color-accent-light)" }}>
+            {children}
+        </h2>
+    ),
+    h3: ({ children }) => (
+        <h3 className="text-sm font-semibold mb-1 mt-2 first:mt-0" style={{ color: "var(--color-text-primary)" }}>
+            {children}
+        </h3>
+    ),
+    a: ({ href, children }) => (
+        <a
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline decoration-1 underline-offset-2 transition-colors hover:opacity-80"
+            style={{ color: "var(--color-accent-light)" }}
+        >
+            {children} ↗
+        </a>
+    ),
+    code: ({ className, children, ...props }) => {
+        const isInline = !className;
+        if (isInline) {
             return (
-                <a
-                    key={i}
-                    href={part}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-block mt-1 text-xs font-medium transition-colors"
-                    style={{ color: "var(--color-accent-light)" }}
+                <code
+                    className="px-1.5 py-0.5 rounded text-xs font-mono"
+                    style={{
+                        background: "var(--color-surface-overlay)",
+                        border: "1px solid var(--color-border)",
+                        color: "var(--color-accent-light)",
+                    }}
+                    {...props}
                 >
-                    {label}
-                </a>
+                    {children}
+                </code>
             );
         }
         return (
-            <span key={i} style={{ whiteSpace: "pre-wrap" }}>
-                {part}
-            </span>
+            <code
+                className={`block p-3 rounded-lg text-xs font-mono overflow-x-auto my-2 ${className || ""}`}
+                style={{
+                    background: "var(--color-surface)",
+                    border: "1px solid var(--color-border)",
+                    color: "var(--color-text-primary)",
+                }}
+                {...props}
+            >
+                {children}
+            </code>
         );
-    });
-}
+    },
+    pre: ({ children }) => (
+        <pre className="my-2 rounded-lg overflow-hidden">{children}</pre>
+    ),
+    blockquote: ({ children }) => (
+        <blockquote
+            className="pl-3 my-2 text-sm italic"
+            style={{
+                borderLeft: "3px solid var(--color-accent)",
+                color: "var(--color-text-secondary)",
+            }}
+        >
+            {children}
+        </blockquote>
+    ),
+    hr: () => (
+        <hr className="my-3 border-0 h-px" style={{ background: "var(--color-border)" }} />
+    ),
+    table: ({ children }) => (
+        <div className="overflow-x-auto my-2 rounded-lg" style={{ border: "1px solid var(--color-border)" }}>
+            <table className="w-full text-xs">{children}</table>
+        </div>
+    ),
+    thead: ({ children }) => (
+        <thead style={{ background: "var(--color-surface-overlay)" }}>{children}</thead>
+    ),
+    th: ({ children }) => (
+        <th className="px-3 py-2 text-left font-semibold" style={{ borderBottom: "1px solid var(--color-border)", color: "var(--color-text-secondary)" }}>
+            {children}
+        </th>
+    ),
+    td: ({ children }) => (
+        <td className="px-3 py-2" style={{ borderBottom: "1px solid var(--color-border)" }}>
+            {children}
+        </td>
+    ),
+};
 
 export function MessageBubble({ message }: { message: Message }) {
     const isUser = message.role === "user";
@@ -70,9 +161,6 @@ export function MessageBubble({ message }: { message: Message }) {
         );
     }
 
-    // Collect tool invocations for this message
-    const toolCalls = message.toolInvocations ?? [];
-
     return (
         <div className="flex items-start gap-3 animate-message-in">
             <div
@@ -82,34 +170,8 @@ export function MessageBubble({ message }: { message: Message }) {
                 D
             </div>
             <div className="max-w-[80%] space-y-2">
-                {/* Inline tool call steps */}
-                {toolCalls.length > 0 && (
-                    <div className="space-y-1">
-                        {toolCalls.map((tc) => (
-                            <div
-                                key={tc.toolCallId}
-                                className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs"
-                                style={{
-                                    background: "var(--color-surface-overlay)",
-                                    border: "1px solid var(--color-border)",
-                                    color: "var(--color-text-secondary)",
-                                }}
-                            >
-                                <span>
-                                    {TOOL_LABELS[tc.toolName] || `🔧 ${tc.toolName}`}
-                                </span>
-                                {tc.state === "result" && (
-                                    <span className="text-green-400">✓</span>
-                                )}
-                                {tc.state === "call" && (
-                                    <span className="text-amber-400">⏳</span>
-                                )}
-                            </div>
-                        ))}
-                    </div>
-                )}
 
-                {/* Text content */}
+                {/* Text content — rendered as markdown */}
                 {message.content && (
                     <div
                         className="px-4 py-3 rounded-2xl rounded-tl-sm text-sm leading-relaxed"
@@ -119,7 +181,12 @@ export function MessageBubble({ message }: { message: Message }) {
                             color: "var(--color-text-primary)",
                         }}
                     >
-                        {formatContent(message.content)}
+                        <ReactMarkdown
+                            remarkPlugins={[remarkGfm]}
+                            components={markdownComponents}
+                        >
+                            {message.content}
+                        </ReactMarkdown>
                     </div>
                 )}
             </div>

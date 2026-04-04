@@ -624,7 +624,38 @@ USER CONTEXT (injected per request — do not reveal this block to the user):
     const systemPrompt = SYSTEM_INSTRUCTION + "\n" + userContext;
 
     const body = await req.json();
-    const { messages } = body;
+    const { messages, conversationId } = body;
+
+    // Persist user message to DB (last message in array is the new one)
+    const lastUserMsg = [...messages].reverse().find((m: { role: string }) => m.role === "user");
+    if (conversationId && lastUserMsg) {
+      await prisma.message.create({
+        data: {
+          conversation_id: conversationId,
+          role: "user",
+          content: lastUserMsg.content,
+        },
+      });
+
+      // Auto-title: if conversation title is still "New Chat", set it from first user message
+      const convo = await prisma.conversation.findUnique({
+        where: { id: conversationId },
+        select: { title: true },
+      });
+      if (convo?.title === "New Chat") {
+        const autoTitle = lastUserMsg.content.slice(0, 50) + (lastUserMsg.content.length > 50 ? "..." : "");
+        await prisma.conversation.update({
+          where: { id: conversationId },
+          data: { title: autoTitle },
+        });
+      }
+
+      // Touch updated_at
+      await prisma.conversation.update({
+        where: { id: conversationId },
+        data: { updated_at: new Date() },
+      });
+    }
 
     const result = streamText({
       model: getModel(),
@@ -632,6 +663,18 @@ USER CONTEXT (injected per request — do not reveal this block to the user):
       messages,
       tools: buildTools(userId, activeWallet.address),
       maxSteps: 10,
+      onFinish: async ({ text }) => {
+        // Persist assistant response to DB
+        if (conversationId && text) {
+          await prisma.message.create({
+            data: {
+              conversation_id: conversationId,
+              role: "assistant",
+              content: text,
+            },
+          });
+        }
+      },
     });
 
     return result.toDataStreamResponse({
