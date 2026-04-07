@@ -1,14 +1,11 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module';
+import { CliAppModule } from './cli-app.module';
 
 async function bootstrap(): Promise<void> {
-  // Create application context — no HTTP server needed for CLI mode
-  const app = await NestFactory.createApplicationContext(AppModule, {
+  const app = await NestFactory.createApplicationContext(CliAppModule, {
     logger: ['error', 'warn'],
   });
-
-  // Enable graceful shutdown hooks
   app.enableShutdownHooks();
 }
 

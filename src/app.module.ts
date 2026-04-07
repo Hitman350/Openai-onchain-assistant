@@ -1,29 +1,23 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { BlockchainModule } from './blockchain/blockchain.module';
-import { SignerModule } from './signers/signer.module';
-import { ProviderModule } from './providers/provider.module';
-import { ContextModule } from './context/context.module';
-import { ToolsModule } from './tools/tools.module';
-import { AgentModule } from './agent/agent.module';
+import { PrismaModule } from './prisma/prisma.module';
+import { ChatModule } from './chat/chat.module';
+import { ExecuteToolModule } from './execute-tool/execute-tool.module';
+import { ConversationsModule } from './conversations/conversations.module';
+import { WalletsModule } from './wallets/wallets.module';
 
+/** HTTP API — primary backend for the Next.js frontend (proxied via rewrites). */
 @Module({
   imports: [
-    // Global config — replaces raw dotenv/config
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: '.env',
+      envFilePath: ['.env', 'web/.env.local'],
     }),
-
-    // Core infrastructure
-    BlockchainModule,
-    SignerModule,
-    ProviderModule,
-    ContextModule,
-
-    // Business logic
-    ToolsModule,
-    AgentModule,
+    PrismaModule,
+    ChatModule,
+    ExecuteToolModule,
+    ConversationsModule,
+    WalletsModule,
   ],
 })
 export class AppModule {}

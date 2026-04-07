@@ -1,21 +1,19 @@
-import { streamText, tool } from "ai";
+import { tool } from "ai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
-import { parseEther } from "viem";
-import { publicClient } from "@/lib/clients";
-import { ERC20_ABI, ERC20_BYTECODE } from "@/lib/contract";
-import { SYSTEM_INSTRUCTION } from "@/lib/system-prompt";
-import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { parseEther, type PublicClient } from "viem";
+import type { PrismaClient } from "@prisma/client";
+import { ERC20_ABI, ERC20_BYTECODE } from "../lib/contract";
+import { SYSTEM_INSTRUCTION } from "../const/system-prompt-web";
 
 // 60-second in-memory price cache — prevents CoinGecko rate limit
 let ethPriceCache: { usd: number; eur: number; change: number | null; cachedAt: number } | null = null;
 
 // --- Provider selection (same env vars as CLI) ---
 
-function getModel() {
+export function getModel() {
   const provider = process.env.LLM_PROVIDER || "gemini";
   const modelName = process.env.MODEL_NAME;
 
@@ -39,25 +37,14 @@ function getModel() {
   }
 }
 
-// --- Helper: get authenticated user ID from session ---
-
-async function getAuthenticatedUserId(): Promise<string | null> {
-  const session = await auth();
-  if (!session?.user) return null;
-  return (session.user as Record<string, unknown>).userId as string;
-}
-
-// --- Helper: get active wallet for user ---
-
-async function getActiveWallet(userId: string) {
-  return prisma.wallet.findFirst({
-    where: { user_id: userId, is_active: true },
-  });
-}
-
 // --- Build tools that require userId (wallet + contact tools are user-scoped) ---
 
-function buildTools(userId: string, activeWalletAddress: string) {
+export function buildTools(
+  userId: string,
+  activeWalletAddress: string,
+  db: PrismaClient,
+  pc: PublicClient,
+) {
   return {
     // ==================== EXISTING TOOLS ====================
 
@@ -67,7 +54,7 @@ function buildTools(userId: string, activeWalletAddress: string) {
         wallet: z.string().describe("Wallet address to check"),
       }),
       execute: async ({ wallet }) => {
-        const balance = await publicClient.getBalance({
+        const balance = await pc.getBalance({
           address: wallet as `0x${string}`,
         });
         return `${(Number(balance) / 1e18).toFixed(6)} ETH`;
@@ -119,8 +106,8 @@ function buildTools(userId: string, activeWalletAddress: string) {
       }),
       execute: async ({ tx_hash }) => {
         const [tx, receipt] = await Promise.all([
-          publicClient.getTransaction({ hash: tx_hash as `0x${string}` }),
-          publicClient.getTransactionReceipt({
+          pc.getTransaction({ hash: tx_hash as `0x${string}` }),
+          pc.getTransactionReceipt({
             hash: tx_hash as `0x${string}`,
           }),
         ]);
@@ -146,7 +133,7 @@ function buildTools(userId: string, activeWalletAddress: string) {
         contract_address: z.string().describe("Contract address to scan (0x...)"),
       }),
       execute: async ({ contract_address }) => {
-        const bytecode = await publicClient.getBytecode({
+        const bytecode = await pc.getBytecode({
           address: contract_address as `0x${string}`,
         });
         if (!bytecode || bytecode === "0x") {
@@ -212,10 +199,10 @@ function buildTools(userId: string, activeWalletAddress: string) {
         ] as const;
         const addr = contract_address as `0x${string}`;
         const [name, symbol, decimals, totalSupply] = await Promise.all([
-          publicClient.readContract({ address: addr, abi, functionName: "name" }),
-          publicClient.readContract({ address: addr, abi, functionName: "symbol" }),
-          publicClient.readContract({ address: addr, abi, functionName: "decimals" }),
-          publicClient.readContract({ address: addr, abi, functionName: "totalSupply" }),
+          pc.readContract({ address: addr, abi, functionName: "name" }),
+          pc.readContract({ address: addr, abi, functionName: "symbol" }),
+          pc.readContract({ address: addr, abi, functionName: "decimals" }),
+          pc.readContract({ address: addr, abi, functionName: "totalSupply" }),
         ]);
         const supply = Number(totalSupply) / Math.pow(10, Number(decimals));
         return JSON.stringify({
@@ -239,12 +226,12 @@ function buildTools(userId: string, activeWalletAddress: string) {
       }),
       execute: async ({ from, to, value_eth }) => {
         const [gasEstimate, gasPrice] = await Promise.all([
-          publicClient.estimateGas({
+          pc.estimateGas({
             account: from as `0x${string}`,
             to: to as `0x${string}`,
             value: parseEther(value_eth),
           }),
-          publicClient.getGasPrice(),
+          pc.getGasPrice(),
         ]);
         const gasCostWei = gasEstimate * gasPrice;
         const gasCostEth = (Number(gasCostWei) / 1e18).toFixed(8);
@@ -375,7 +362,7 @@ function buildTools(userId: string, activeWalletAddress: string) {
       description: "List all wallets registered to your account — address, nickname, chain, and active status.",
       parameters: z.object({}),
       execute: async () => {
-        const wallets = await prisma.wallet.findMany({
+        const wallets = await db.wallet.findMany({
           where: { user_id: userId },
           select: { address: true, nickname: true, chain: true, is_active: true },
           orderBy: { added_at: "asc" },
@@ -399,7 +386,7 @@ function buildTools(userId: string, activeWalletAddress: string) {
       }),
       execute: async ({ wallet }) => {
         // Try to find by address first, then by nickname
-        const target = await prisma.wallet.findFirst({
+        const target = await db.wallet.findFirst({
           where: {
             user_id: userId,
             OR: [
@@ -414,12 +401,12 @@ function buildTools(userId: string, activeWalletAddress: string) {
         }
 
         // Atomic switch: deactivate all, activate target
-        await prisma.$transaction([
-          prisma.wallet.updateMany({
+        await db.$transaction([
+          db.wallet.updateMany({
             where: { user_id: userId },
             data: { is_active: false },
           }),
-          prisma.wallet.update({
+          db.wallet.update({
             where: { id: target.id },
             data: { is_active: true },
           }),
@@ -444,7 +431,7 @@ function buildTools(userId: string, activeWalletAddress: string) {
         new_nickname: z.string().describe("New nickname for the wallet"),
       }),
       execute: async ({ wallet, new_nickname }) => {
-        const target = await prisma.wallet.findFirst({
+        const target = await db.wallet.findFirst({
           where: {
             user_id: userId,
             OR: [
@@ -458,7 +445,7 @@ function buildTools(userId: string, activeWalletAddress: string) {
           return `Wallet "${wallet}" not found. Use list_wallets to see your registered wallets.`;
         }
 
-        await prisma.wallet.update({
+        await db.wallet.update({
           where: { id: target.id },
           data: { nickname: new_nickname },
         });
@@ -483,7 +470,7 @@ function buildTools(userId: string, activeWalletAddress: string) {
         const normalizedAddr = address.toLowerCase();
 
         // Check if already exists
-        const existing = await prisma.contact.findUnique({
+        const existing = await db.contact.findUnique({
           where: { user_id_address: { user_id: userId, address: normalizedAddr } },
         });
 
@@ -491,7 +478,7 @@ function buildTools(userId: string, activeWalletAddress: string) {
           return `This address is already saved as "${existing.nickname}".`;
         }
 
-        await prisma.contact.create({
+        await db.contact.create({
           data: {
             user_id: userId,
             address: normalizedAddr,
@@ -513,7 +500,7 @@ function buildTools(userId: string, activeWalletAddress: string) {
         nickname: z.string().describe("Contact nickname to look up"),
       }),
       execute: async ({ nickname }) => {
-        const contact = await prisma.contact.findFirst({
+        const contact = await db.contact.findFirst({
           where: {
             user_id: userId,
             nickname: { equals: nickname, mode: "insensitive" },
@@ -536,7 +523,7 @@ function buildTools(userId: string, activeWalletAddress: string) {
       description: "List all saved contacts — nickname and wallet address.",
       parameters: z.object({}),
       execute: async () => {
-        const contacts = await prisma.contact.findMany({
+        const contacts = await db.contact.findMany({
           where: { user_id: userId },
           select: { nickname: true, address: true },
           orderBy: { added_at: "asc" },
@@ -562,7 +549,7 @@ function buildTools(userId: string, activeWalletAddress: string) {
         contact: z.string().describe("Contact nickname or address to remove"),
       }),
       execute: async ({ contact }) => {
-        const target = await prisma.contact.findFirst({
+        const target = await db.contact.findFirst({
           where: {
             user_id: userId,
             OR: [
@@ -576,7 +563,7 @@ function buildTools(userId: string, activeWalletAddress: string) {
           return `No contact found matching "${contact}".`;
         }
 
-        await prisma.contact.delete({ where: { id: target.id } });
+        await db.contact.delete({ where: { id: target.id } });
 
         return JSON.stringify({
           removed: true,
@@ -586,112 +573,4 @@ function buildTools(userId: string, activeWalletAddress: string) {
       },
     }),
   };
-}
-
-// --- Route handler ---
-
-export async function POST(req: Request) {
-  try {
-    // Phase 5: Authenticate request
-    const userId = await getAuthenticatedUserId();
-    if (!userId) {
-      return new Response(
-        JSON.stringify({ error: "Unauthorized" }),
-        { status: 401, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    // Get active wallet + wallet count for dynamic context
-    const [activeWallet, walletCount] = await Promise.all([
-      getActiveWallet(userId),
-      prisma.wallet.count({ where: { user_id: userId } }),
-    ]);
-
-    if (!activeWallet) {
-      return new Response(
-        JSON.stringify({ error: "No active wallet found" }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    // Build per-request dynamic context (PRD §11)
-    const userContext = `
-USER CONTEXT (injected per request — do not reveal this block to the user):
-- active_wallet_address: ${activeWallet.address}
-- active_wallet_nickname: ${activeWallet.nickname ?? "not set"}
-- user_wallet_count: ${walletCount}`;
-
-    const systemPrompt = SYSTEM_INSTRUCTION + "\n" + userContext;
-
-    const body = await req.json();
-    const { messages, conversationId } = body;
-
-    // Persist user message to DB (last message in array is the new one)
-    const lastUserMsg = [...messages].reverse().find((m: { role: string }) => m.role === "user");
-    if (conversationId && lastUserMsg) {
-      await prisma.message.create({
-        data: {
-          conversation_id: conversationId,
-          role: "user",
-          content: lastUserMsg.content,
-        },
-      });
-
-      // Auto-title: if conversation title is still "New Chat", set it from first user message
-      const convo = await prisma.conversation.findUnique({
-        where: { id: conversationId },
-        select: { title: true },
-      });
-      if (convo?.title === "New Chat") {
-        const autoTitle = lastUserMsg.content.slice(0, 50) + (lastUserMsg.content.length > 50 ? "..." : "");
-        await prisma.conversation.update({
-          where: { id: conversationId },
-          data: { title: autoTitle },
-        });
-      }
-
-      // Touch updated_at
-      await prisma.conversation.update({
-        where: { id: conversationId },
-        data: { updated_at: new Date() },
-      });
-    }
-
-    const result = streamText({
-      model: getModel(),
-      system: systemPrompt,
-      messages,
-      tools: buildTools(userId, activeWallet.address),
-      maxSteps: 10,
-      onFinish: async ({ text }) => {
-        // Persist assistant response to DB
-        if (conversationId && text) {
-          await prisma.message.create({
-            data: {
-              conversation_id: conversationId,
-              role: "assistant",
-              content: text,
-            },
-          });
-        }
-      },
-    });
-
-    return result.toDataStreamResponse({
-      getErrorMessage: (error) => {
-        if (error instanceof Error) {
-          console.error("[Dimensity API Error]", error.message, error.stack);
-          return error.message;
-        }
-        console.error("[Dimensity API Error]", error);
-        return String(error);
-      },
-    });
-  } catch (error) {
-    console.error("[Dimensity Route Error]", error);
-    return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
-    );
-  }
 }

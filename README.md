@@ -8,6 +8,7 @@
 
 [![Node.js](https://img.shields.io/badge/Node.js-≥18-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://typescriptlang.org)
+[![NestJS](https://img.shields.io/badge/NestJS-11-E0234E?style=flat-square&logo=nestjs&logoColor=white)](https://nestjs.com)
 [![Next.js](https://img.shields.io/badge/Next.js-15-000000?style=flat-square&logo=next.js&logoColor=white)](https://nextjs.org)
 [![Vercel AI SDK](https://img.shields.io/badge/Vercel_AI_SDK-4-000000?style=flat-square&logo=vercel&logoColor=white)](https://sdk.vercel.ai)
 [![viem](https://img.shields.io/badge/viem-2.x-1E1E20?style=flat-square)](https://viem.sh)
@@ -15,10 +16,10 @@
 [![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black)](https://react.dev)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
 
-**An autonomous AI agent that replaces dApp UIs with natural language.**
+**An autonomous AI agent that replaces dApp UIs with natural language.**  
 **Connect your wallet. Type what you want. Watch it execute.**
 
-[Live Demo →](https://dimensity.vercel.app) · [Report Bug](https://github.com/Hitman350/dimensity/issues) · [Request Feature](https://github.com/Hitman350/dimensity/issues)
+[What it does](#what-you-can-do) · [Features](#feature-highlights) · [Security](#6-layer-security-model) · [Architecture](#architecture) · [Quick Start](#quick-start) · [Tools](#17-registered-tools) · [License](#license)
 
 <br />
 
@@ -28,28 +29,46 @@
 
 ## The Problem
 
-Interacting with blockchain today means:
-- Navigating **dozens of dApp interfaces** just to send tokens, deploy contracts, or check balances
-- **Copy-pasting** hex addresses and manually decoding transaction data
-- Having **zero safety checks** before signing — you hope you read the calldata right
-- **No memory** — every session starts from scratch, no contacts, no context
+Interacting with a chain today often means:
+
+- Jumping between **many dApp UIs** for transfers, deploys, and balance checks
+- **Copy-pasting** hex addresses and guessing what transaction data does
+- **Weak guardrails** before you sign — easy to misread calldata or miss risk
+- **No continuity** — little shared context between sessions (contacts, history, intent)
 
 ## The Solution
 
-Dimensity turns all of that into a single conversation. You talk. It executes.
+Dimensity turns that into **one chat**. You describe intent in plain language; a **tool-calling agent** (Vercel AI SDK + viem) plans steps, runs read operations automatically, and pauses **writes** until you confirm in the UI.
 
 ```
 You:   "Send 0.05 ETH to Alice"
-Agent:  Resolved Alice → 0x123...abc
-        Gas estimate: 0.000042 ETH. Confirm?
-        [User clicks Confirm]
-Agent:  ✅ Sent! Tx: 0xdef...789
-        Save Alice as a contact?
+Agent: Resolved Alice → 0x123...abc
+       Gas estimate: 0.000042 ETH. Confirm?
+       [User clicks Confirm]
+Agent: ✅ Sent! Tx: 0xdef...789
+       Save Alice as a contact?
 ```
 
-Under the hood, a **recursive tool-calling agent loop** built on the Vercel AI SDK connects multi-provider LLM intelligence to the viem blockchain client. Every transaction is simulated before broadcast. Every wallet interaction requires cryptographic proof of ownership.
+The web app uses **Sign-In with Ethereum (SIWE)** and **JWT sessions**, keeps **multi-wallet and contact** data in PostgreSQL, and streams assistant replies with **markdown**. Chains supported in-repo today: **Abstract Testnet** (see [Network Details](#network-details)).
 
-> **While tools like Zapper and DeBank just *show* you data, Dimensity *explains* it and *acts* on it** — turning blockchain interaction into a guided conversation.
+> **Compared to read-only dashboards** (aggregators that mostly show balances and positions), Dimensity is built to **reason, call chain tools, and act** — with explicit approval for anything that spends gas or deploys code.
+
+---
+
+## 🎯 What you can do
+
+Dimensity is both an **execution surface** and a **research assistant** for the configured network:
+
+| Area | Examples |
+|:-----|:---------|
+| **Money movement** | Send native ETH; estimate gas before sends; use **saved contacts** so you can say “pay Alice” instead of pasting `0x…` |
+| **Wallets & identity** | Register **multiple wallets**, switch the active one, rename them — the model uses your **active wallet** for balances and sends |
+| **Portfolio & activity** | Check balance, recent **transaction history** (via the explorer API), and **ETH price** in USD/EUR for rough fiat context |
+| **Tokens** | Read **ERC-20 metadata** (name, symbol, decimals, supply); **deploy** a standard ERC-20 with name, symbol, and initial supply (confirmed in UI) |
+| **Safety & understanding** | **Explain** any tx hash in plain language; **scan** contract bytecode for risky patterns (e.g. mint, pause, ownership transfer); the agent is instructed to **refuse high-risk sends** when scans look critical |
+| **Continuity** | **Persistent chats** with sidebar history, auto-titled threads, and structured follow-ups (e.g. estimate gas → then send, as in the system prompt) |
+
+The **HTTP API** is a **NestJS** app at the repository root (`src/main.ts`): chat streaming, tools, conversations, wallets, and execute-tool all run there. **Next.js** (`web/`) serves the UI and **NextAuth** (`/api/auth/*` only); it **proxies** `/api/chat`, `/api/conversations`, `/api/wallets`, and `/api/execute-tool` to the Nest server (see `web/next.config.ts`). An optional **NestJS CLI** (`npm run build && npm run start:cli`) runs the older terminal agent without HTTP.
 
 ---
 
@@ -60,19 +79,19 @@ Under the hood, a **recursive tool-calling agent loop** built on the Vercel AI S
 <td width="50%">
 
 ### 🔐 Authentication & Identity
-- **SIWE Login** — prove wallet ownership via cryptographic signature. No emails, no passwords
+- **SIWE Login** — prove wallet ownership via cryptographic signature
 - **Multi-Wallet** — add multiple wallets, switch active context seamlessly
 - **Contact Book** — save address→nickname mappings for natural language sending
-- **Session Memory** — remembers `lastRecipient` and `lastAmount` for follow-ups
+- **Injected context** — each request includes active wallet address and nickname for consistent answers
 
 </td>
 <td width="50%">
 
 ### ⚡ Transaction Execution
-- **Send ETH** — signs and broadcasts native transfers with pre-flight gas estimation
+- **Send ETH** — signs and broadcasts native transfers (after confirmation)
 - **Deploy ERC-20** — deploys tokens with name, symbol, and supply via compiled bytecode
-- **Gas Estimation** — shows precise gas costs in ETH before confirmation
-- **Client Confirmation** — every write operation halts for explicit user approval
+- **Gas Estimation** — `estimate_gas` tool surfaces cost before you approve a send
+- **Client Confirmation** — write operations surface in a confirmation step before broadcast
 
 </td>
 </tr>
@@ -80,19 +99,27 @@ Under the hood, a **recursive tool-calling agent loop** built on the Vercel AI S
 <td width="50%">
 
 ### 🔍 Analysis & Intelligence
-- **Explain Transaction** — decodes any tx hash into plain-English
-- **Contract Scanner** — analyzes bytecode for dangerous selectors (`mint`, `blacklist`, `pause`, `selfdestruct`)
-- **Token Info** — reads `name`, `symbol`, `decimals`, `totalSupply` from any ERC-20
-- **Live ETH Price** — real-time USD/EUR via CoinGecko with 60s cache
+- **Explain Transaction** — decodes a tx hash into a readable summary
+- **Contract Scanner** — analyzes bytecode for notable selectors (mint, blacklist, pause, etc.)
+- **Token Info** — reads `name`, `symbol`, `decimals`, `totalSupply` from ERC-20s
+- **Live ETH Price** — USD/EUR via CoinGecko with a short in-memory cache
 
 </td>
 <td width="50%">
 
+### 💬 Conversation History
+- **Persistent Chats** — conversations stored in PostgreSQL
+- **Sidebar Navigation** — browse, switch, and delete past conversations
+- **Auto-Titling** — conversations named from your first message
+- **Markdown Rendering** — assistant messages rendered with rich text, lists, and code blocks
+
+</td>
+</tr>
+<tr>
+<td width="50%" colspan="2">
+
 ### 🤖 Provider-Agnostic LLM
-- **Gemini** (default) — `gemini-2.5-flash`
-- **OpenAI** — `gpt-4o`
-- **Anthropic** — `claude-sonnet-4-20250514`
-- Swap engines with one env var. All tool execution stays untouched.
+Swap models with environment variables — **Gemini** (default), **OpenAI** (`gpt-4o`), or **Anthropic** (`claude-sonnet-4-20250514`). Tool wiring stays the same.
 
 </td>
 </tr>
@@ -102,30 +129,11 @@ Under the hood, a **recursive tool-calling agent loop** built on the Vercel AI S
 
 ## 🔒 6-Layer Security Model
 
-Dimensity implements defense-in-depth across every interaction surface. No single point of failure.
+Dimensity implements defense-in-depth across every interaction surface.
 
 ```mermaid
-graph TB
-    subgraph "Layer 1: SIWE Authentication"
-        A["Cryptographic wallet signature<br/>No passwords — prove you own the key"]
-    end
-    subgraph "Layer 2: Replay Protection"
-        B["Server-generated nonce<br/>5-minute expiry · single-use enforcement"]
-    end
-    subgraph "Layer 3: Session Isolation"
-        C["JWT-only sessions (7-day expiry)<br/>No server-side session storage"]
-    end
-    subgraph "Layer 4: Wallet Deletion Guard"
-        D["Re-SIWE required to remove wallet<br/>Must re-prove ownership before deletion"]
-    end
-    subgraph "Layer 5: Key Isolation"
-        E["LLM never touches private keys<br/>Structured intent only — no raw calldata"]
-    end
-    subgraph "Layer 6: Write Safety"
-        F["Every state-changing op requires<br/>explicit user confirmation via modal"]
-    end
-
-    A --> B --> C --> D --> E --> F
+graph LR
+    A["🔑 SIWE Auth"] --> B["🔄 Replay Guard"] --> C["🛡️ JWT Sessions"] --> D["🗝️ Key Isolation"] --> E["✋ Write Confirmation"] --> F["📋 Audit Trail"]
 
     style A fill:#1a1a2e,stroke:#8B5CF6,color:#fff
     style B fill:#1a1a2e,stroke:#8B5CF6,color:#fff
@@ -135,97 +143,115 @@ graph TB
     style F fill:#1a1a2e,stroke:#8B5CF6,color:#fff
 ```
 
-| Layer | Mechanism | Implementation |
-|:------|:----------|:---------------|
-| **1. Authentication** | SIWE — cryptographic proof of wallet ownership | `viem.verifyMessage()` in `auth.ts` |
-| **2. Replay Protection** | Server-generated nonce with 5-minute expiry | `Nonce` model — single-use, DB-enforced |
-| **3. Session Isolation** | JWT-only (7-day expiry), no server-side sessions | NextAuth v5 `strategy: "jwt"` |
-| **4. Wallet Deletion** | Requires re-SIWE — must prove ownership of the wallet being removed | Re-authentication gate on delete |
-| **5. Key Isolation** | LLM never touches private keys or raw calldata | Signer abstraction — structured intent only |
-| **6. Write Safety** | Every state-changing operation requires explicit user confirmation | `ConfirmationModal` intercepts all write tool calls |
+| Layer | What It Does | How |
+|:------|:-------------|:----|
+| **SIWE Auth** | Proves wallet ownership cryptographically | `viem.verifyMessage()` — no passwords |
+| **Replay Guard** | Prevents signature reuse | Server nonce, 5-min expiry, single-use |
+| **JWT Sessions** | Stateless auth, no session table for tokens | 7-day expiry, signed tokens |
+| **Key Isolation** | LLM never sees private keys | Structured intents only; signing happens in configured execution path |
+| **Write Confirmation** | User must approve each write | Confirmation UI before `/api/execute-tool` runs send/deploy |
+| **Audit Trail** | Conversation history persisted | Messages stored in PostgreSQL |
 
 ---
 
 ## 🏗️ Architecture
 
-### System Overview
-
-```
-┌──────────────────────────────────────────────────┐
-│              LLM Provider Layer                  │
-│     Gemini  ·  OpenAI  ·  Anthropic  (adapters)  │
-└───────────────────┬──────────────────────────────┘
-                    │  Vercel AI SDK (streamText)
-┌───────────────────▼──────────────────────────────┐
-│          Agent Loop  (Next.js API Route)         │
-│   Recursive · Concurrent · maxSteps: 10          │
-│   Per-request auth · Dynamic system prompt       │
-└───────────────────┬──────────────────────────────┘
-                    │  CoreTool interface (Zod validated)
-┌───────────────────▼──────────────────────────────┐
-│            Tool Execution Layer                  │
-│    17 tools  ·  inline registry  ·  zod schemas  │
-│    Read tools → auto-execute                     │
-│    Write tools → ConfirmationModal               │
-└───────────────────┬──────────────────────────────┘
-                    │  Signer interface
-┌───────────────────▼──────────────────────────────┐
-│              Signer Layer                        │
-│   LocalSigner  ·  KernelSigner (AA-ready)        │
-└───────────────────┬──────────────────────────────┘
-                    │
-┌───────────────────▼──────────────────────────────┐
-│        Abstract Testnet  (zkSync L2)             │
-└──────────────────────────────────────────────────┘
-```
-
-### Request Flow
+### How a Request Flows
 
 ```mermaid
 sequenceDiagram
-    participant U as User
-    participant UI as Next.js Chat UI
-    participant API as /api/chat
-    participant LLM as Gemini / OpenAI / Anthropic
-    participant Tools as Tool Registry (17 tools)
-    participant Chain as Abstract Testnet (zkSync L2)
+    actor User
+    participant UI as Chat UI
+    participant API as Nest API
+    participant LLM as LLM Provider
+    participant Chain as Blockchain
 
-    U->>UI: "Send 0.05 ETH to Alice"
-    UI->>API: POST messages + session JWT
-    API->>API: Validate JWT · load active wallet
-    API->>LLM: streamText (system prompt + wallet context)
-    LLM-->>API: tool_call: resolve_contact("Alice")
-    API->>Tools: auto-execute (read tool)
-    Tools-->>API: 0x123...abc
-    API->>LLM: tool result appended → recurse
-    LLM-->>API: tool_call: send_transaction(0x123...abc, 0.05)
-    API-->>UI: pending tool call (no execute — write tool)
-    UI->>U: ConfirmationModal: "Send 0.05 ETH?"
-    U->>UI: Clicks Confirm
-    UI->>API: POST /api/execute-tool (authenticated)
-    API->>Chain: broadcast signed transaction
-    Chain-->>API: tx receipt
-    API-->>UI: "✅ Sent! Tx: 0xdef..."
+    User->>UI: "Send 0.05 ETH to Alice"
+    UI->>API: POST /api/chat + JWT
+    API->>API: Auth · load wallet · inject context
+    API->>LLM: Stream with tools
+    LLM->>API: resolve_contact("Alice")
+    API->>API: Auto-execute (read tool)
+    API->>LLM: Alice → 0x123...abc
+    LLM->>API: send_transaction(0x123, 0.05)
+    API-->>UI: Pending write → needs approval
+    UI->>User: "Send 0.05 ETH to Alice?"
+    User->>UI: ✅ Confirm
+    UI->>API: POST /api/execute-tool
+    API->>Chain: Broadcast signed tx
+    Chain-->>UI: ✅ Tx confirmed
 ```
 
-### Read vs. Write Tool Execution
+### Read vs Write Tool Execution
 
 ```mermaid
 flowchart LR
-    LLM["LLM generates<br/>tool_call"] --> CHECK{Has execute<br/>function?}
-    CHECK -->|"Yes (Read Tool)"| AUTO["Auto-execute<br/>server-side"]
-    CHECK -->|"No (Write Tool)"| MODAL["Return to client<br/>→ ConfirmationModal"]
-    MODAL --> USER{User decision}
-    USER -->|Confirm| EXEC["POST /api/execute-tool<br/>(authenticated)"]
-    USER -->|Cancel| CANCEL["Tool result: 'cancelled'"]
-    AUTO --> RESULT["Result → LLM<br/>for next step"]
-    EXEC --> RESULT
+    A["LLM tool call"] --> B{"Has execute fn?"}
+    B -->|"Yes"| C["✅ Auto-execute"]
+    B -->|"No"| D["⏸️ Ask user"]
+    D --> E{"Approved?"}
+    E -->|"Yes"| F["Execute on-chain"]
+    E -->|"No"| G["Cancel"]
+    C --> H["Result → LLM"]
+    F --> H
 
-    style LLM fill:#1a1a2e,stroke:#8B5CF6,color:#fff
-    style CHECK fill:#1a1a2e,stroke:#F59E0B,color:#fff
-    style AUTO fill:#1a1a2e,stroke:#10B981,color:#fff
-    style MODAL fill:#1a1a2e,stroke:#EF4444,color:#fff
-    style EXEC fill:#1a1a2e,stroke:#10B981,color:#fff
+    style A fill:#1a1a2e,stroke:#8B5CF6,color:#fff
+    style B fill:#1a1a2e,stroke:#F59E0B,color:#fff
+    style C fill:#1a1a2e,stroke:#10B981,color:#fff
+    style D fill:#1a1a2e,stroke:#EF4444,color:#fff
+    style F fill:#1a1a2e,stroke:#10B981,color:#fff
+```
+
+### System Layers
+
+```mermaid
+graph TB
+    subgraph Frontend["Next.js Frontend"]
+        UI["Chat UI + Sidebar"]
+        Modal["Confirmation Modal"]
+    end
+
+    subgraph NextAuthOnly["Next.js · Auth only"]
+        NA["/api/auth/* · SIWE + JWT"]
+    end
+
+    subgraph Backend["NestJS HTTP API"]
+        Agent["Agent loop + tools"]
+        Exec["execute-tool"]
+    end
+
+    subgraph Data["Data Layer"]
+        DB["PostgreSQL"]
+        Prisma["Prisma ORM"]
+    end
+
+    subgraph LLM["LLM Providers"]
+        G["Gemini"]
+        O["OpenAI"]
+        A["Anthropic"]
+    end
+
+    subgraph Chain["Blockchain"]
+        Viem["viem Client"]
+        Net["Abstract Testnet"]
+    end
+
+    subgraph CliOpt["Optional: NestJS CLI"]
+        REPL["Terminal REPL"]
+    end
+
+    UI --> Agent
+    Modal --> Exec
+    Agent --> G & O & A
+    Agent --> Viem --> Net
+    Exec --> Viem
+    NA --> Prisma --> DB
+    Agent --> Prisma
+
+    style UI fill:#1a1a2e,stroke:#8B5CF6,color:#fff
+    style Agent fill:#1a1a2e,stroke:#10B981,color:#fff
+    style DB fill:#1a1a2e,stroke:#F59E0B,color:#fff
+    style Net fill:#1a1a2e,stroke:#EF4444,color:#fff
 ```
 
 ---
@@ -255,8 +281,8 @@ flowchart LR
 | 16 | `get_contacts` | Read | List all saved contacts |
 | 17 | `remove_contact` | Read | Delete a contact entry |
 
-> **Read tools** include an `execute` function and run server-side automatically.
-> **Write tools** omit `execute`, causing the AI SDK to return them to the client for user confirmation via `ConfirmationModal`.
+> **Read tools** define an `execute` handler and run on the server during the agent turn.  
+> **Write tools** omit `execute`, so the client shows **ConfirmationModal** and completes execution via `/api/execute-tool`.
 
 </details>
 
@@ -310,43 +336,6 @@ Bot:  ⚠️ High risk detected:
 
 ---
 
-## 📁 Project Structure
-
-```
-dimensity/
-├── src/                          # Standalone CLI agent (TypeScript)
-│   ├── agent/                    # Agent loop & prompt engine
-│   ├── providers/                # LLM adapters (Gemini, OpenAI, Claude)
-│   ├── signers/                  # LocalSigner, KernelSigner (AA-ready)
-│   └── tools/                    # 11 CLI tool implementations
-│
-├── web/                          # Next.js 15 full-stack web app
-│   ├── app/
-│   │   ├── page.tsx              # Auth gate → ConnectWallet / ChatInterface
-│   │   ├── globals.css           # Design system (CSS custom properties)
-│   │   └── api/
-│   │       ├── chat/route.ts     # Agent loop: 17 tools, per-request auth
-│   │       ├── execute-tool/     # Server-side execution after confirmation
-│   │       ├── auth/             # SIWE nonce + verify + NextAuth handler
-│   │       └── wallets/          # Wallet CRUD (add, switch, rename, delete)
-│   ├── components/
-│   │   ├── ChatInterface.tsx     # useChat hook, streaming, scroll logic
-│   │   ├── ConfirmationModal.tsx # Pre-flight approval for write operations
-│   │   ├── ConnectWallet.tsx     # SIWE MetaMask connection flow
-│   │   ├── Header.tsx            # Wallet switcher + sign out
-│   │   ├── MessageBubble.tsx     # Rich message rendering + inline tools
-│   │   └── SessionProvider.tsx   # NextAuth session wrapper
-│   ├── lib/
-│   │   ├── auth.ts               # NextAuth v5 config + SIWE + viem verify
-│   │   ├── clients.ts            # Shared viem public client
-│   │   ├── prisma.ts             # Singleton PrismaClient
-│   │   └── system-prompt.ts      # LLM persona + wallet/contact rules
-│   └── prisma/
-│       └── schema.prisma         # User, Wallet, Contact, Nonce models
-```
-
----
-
 ## 🚀 Quick Start
 
 ### Prerequisites
@@ -355,7 +344,7 @@ dimensity/
 |:------------|:-------|
 | Node.js ≥ 18 | [nodejs.org](https://nodejs.org) |
 | MetaMask | [metamask.io](https://metamask.io) |
-| Gemini API Key | [Google AI Studio](https://aistudio.google.com/) |
+| LLM API Key (any one) | [Gemini](https://aistudio.google.com/) · [OpenAI](https://platform.openai.com/) · [Anthropic](https://console.anthropic.com/) |
 | Supabase Project | [supabase.com](https://supabase.com) (free tier) |
 | Testnet ETH | [Abstract Faucet](https://faucet.abs.xyz) |
 
@@ -363,19 +352,26 @@ dimensity/
 
 ```bash
 git clone https://github.com/Hitman350/dimensity.git
-cd dimensity/web
+cd dimensity
 npm install
+cd web && npm install && cd ..
 ```
+
+The root `npm install` runs Prisma client generation against `web/prisma/schema.prisma` and installs NestJS API dependencies.
 
 ### 2. Configure Environment
 
-Create `web/.env.local`:
+Create **`web/.env.local`** (Next.js + NextAuth). Nest loads the same file via `ConfigModule` (`envFilePath: ['.env', 'web/.env.local']`), so you can keep a single env file under `web/` or add a root `.env` with the same variables when running only the API:
 
 ```env
-# LLM Provider (default: Gemini)
+# LLM — pick ONE provider (Gemini is the default)
 GEMINI_API_KEY=your_gemini_key
+# OPENAI_API_KEY=sk-...          # uncomment to use OpenAI (gpt-4o)
+# ANTHROPIC_API_KEY=sk-ant-...   # uncomment to use Anthropic (claude-sonnet)
+# LLM_PROVIDER=openai            # set to "openai" or "claude" to switch
+# MODEL_NAME=...                 # optional override for the model id
 
-# Signer (development — DO NOT use mainnet keys)
+# Signer (development — use a dedicated test key; see execute-tool implementation)
 PRIVATE_KEY=0x_your_testnet_private_key
 
 # Database (Supabase Postgres — use pooler URL)
@@ -386,26 +382,40 @@ NEXTAUTH_SECRET=<openssl rand -base64 32>
 NEXTAUTH_URL=http://localhost:3000
 ```
 
+Optional: set `BACKEND_URL` (default `http://127.0.0.1:4000`) if the Nest API is not on localhost port 4000. Set `FRONTEND_ORIGIN` in the Nest process if the UI origin differs from `http://localhost:3000`.
+
 ### 3. Initialize Database
 
 ```bash
+cd web
 npx prisma generate
 npx prisma migrate dev --name init
+cd ..
 ```
 
-### 4. Run
+### 4. Run (two processes)
+
+**Terminal A — Nest API (required):**
 
 ```bash
-npm run dev
+npm run start:dev
 ```
 
-Open `http://localhost:3000` → Connect MetaMask → Start chatting.
+Listens on **`http://127.0.0.1:4000`** (override with `BACKEND_PORT`).
+
+**Terminal B — Next.js frontend:**
+
+```bash
+cd web && npm run dev
+```
+
+Open `http://localhost:3000` → Connect MetaMask → Start chatting. Browser calls stay on port 3000; Next **rewrites** API traffic to the Nest backend.
 
 ---
 
 ## 🔀 Switching LLM Providers
 
-Dimensity is **provider-agnostic**. Swap intelligence engines with one env var:
+Dimensity is **provider-agnostic**. Swap models with environment variables:
 
 | Provider | Env Var | Default Model |
 |:---------|:--------|:--------------|
@@ -418,18 +428,18 @@ LLM_PROVIDER=openai
 OPENAI_API_KEY=sk-...
 ```
 
-All tool execution, streaming, and confirmation logic remains untouched.
+Streaming, tools, and confirmation behavior stay the same.
 
 ---
 
 ## 🧩 Adding a New Tool
 
-Tools are registered inline in `web/app/api/chat/route.ts` using the Vercel AI SDK's `tool()` function:
+Tools are registered in `src/chat/chat-tools.builder.ts` (`buildTools()`) using the Vercel AI SDK `tool()` helper:
 
 ```typescript
-// Inside buildTools() in chat/route.ts
+// Inside buildTools() in chat-tools.builder.ts
 get_network_status: tool({
-    description: "Get current block number and gas price on Abstract Testnet.",
+    description: "Get current block number and gas price.",
     parameters: z.object({}),
     execute: async () => {
         const [block, gasPrice] = await Promise.all([
@@ -444,10 +454,10 @@ get_network_status: tool({
 }),
 ```
 
-- **Read tools**: Include `execute` → auto-dispatched by the agent
-- **Write tools**: Omit `execute` → intercepted by `<ConfirmationModal />` for user approval
+- **Read tools**: Include `execute` → invoked during the agent turn  
+- **Write tools**: Omit `execute` → returned to the client for **ConfirmationModal**, then `/api/execute-tool`
 
-No other code changes required. The agent loop auto-discovers registered tools.
+Add a matching handler in `src/execute-tool/execute-tool.service.ts` if the tool performs an on-chain write.
 
 ---
 
@@ -455,35 +465,14 @@ No other code changes required. The agent loop auto-discovers registered tools.
 
 | Decision | Choice | Rationale |
 |:---------|:-------|:----------|
-| **Provider-agnostic LLM** | Vercel AI SDK adapters | No vendor lock-in. Switch Gemini → GPT-4o with one env var |
-| **Signer abstraction** | `LocalSigner` / `KernelSigner` | LLM outputs intent, never touches cryptography |
-| **SIWE over Passkeys** | Existing MetaMask wallets | Target audience is crypto-native — no identity fragmentation |
-| **Blockscout over Alchemy** | REST API at `explorer.testnet.abs.xyz` | Free, fast, and indexes Abstract Testnet properly |
-| **Vanilla CSS over Tailwind** | CSS custom properties design system | Full control over design tokens, no build dependency |
-| **No conversation DB** | React `useChat` state | Simple. Persistence adds complexity with no immediate ROI |
-
----
-
-## ⚠️ Limitations
-
-- **Not fully autonomous** — responds to user prompts, does not run background jobs
-- **Predefined tool set** — the LLM cannot write or execute arbitrary code
-- **Testnet only** — operates exclusively on Abstract Testnet
-- **Server-side signing** — development uses `.env` private key; production requires client-side MetaMask signing
-- **Requires MetaMask** — no embedded wallet fallback yet
-- **Ephemeral conversations** — history clears on page refresh
-- **Single active wallet** — AI views balances for the active wallet only
-
----
-
-## 🗺️ Roadmap
-
-| Phase | Status | Description |
-|:------|:-------|:------------|
-| **Phase 1** | ✅ Complete | AI SDK integration, streaming chat, 10 blockchain tools, confirmation modal |
-| **Phase 2** | ✅ Complete | SIWE auth, multi-wallet, contact book, per-request signer |
-| **Phase 3** | 🔄 Planned | Proactive approval scanning, full tx simulation UI, client-side MetaMask signing |
-| **Phase 4** | 🔮 Future | Multi-chain (Arbitrum, Base), Passkey auth via ZeroDev, conversation persistence |
+| **Provider-agnostic LLM** | Vercel AI SDK adapters | Swap Gemini ↔ GPT ↔ Claude without rewriting tools |
+| **NestJS HTTP API** | Primary backend (`src/main.ts`) | Chat, tools, DB-backed routes; Next.js proxies `/api/*` except auth |
+| **NestJS CLI** | `CliAppModule` + readline | Optional terminal agent (legacy tool registry under `src/tools/`) |
+| **Signer abstraction** | `LocalSigner` / `KernelSigner` (CLI) | Model outputs intent; crypto stays in signer layer |
+| **SIWE over Passkeys** | MetaMask-first | Audience already uses browser wallets |
+| **Persistent conversations** | PostgreSQL via Prisma | Full chat history with auto-titling |
+| **Markdown rendering** | react-markdown + remark-gfm | Readable structured answers |
+| **Blockscout** | REST API on Abstract explorer | Indexes testnet; no paid indexer required for history |
 
 ---
 
@@ -494,7 +483,7 @@ No other code changes required. The agent loop auto-discovers registered tools.
 | **Chain** | Abstract Testnet |
 | **Type** | zkSync-based Layer 2 Rollup |
 | **Chain ID** | 11124 |
-| **EIP-712** | Required for all typed transactions |
+| **EIP-712** | Required for typed transactions (zkSync stack) |
 | **Faucet** | [faucet.abs.xyz](https://faucet.abs.xyz) |
 | **Explorer** | [explorer.testnet.abs.xyz](https://explorer.testnet.abs.xyz) |
 
@@ -504,15 +493,17 @@ No other code changes required. The agent loop auto-discovers registered tools.
 
 | Technology | Role |
 |:-----------|:-----|
-| **Next.js 15** | Full-stack App Router framework |
+| **Next.js 15** | App Router — UI; NextAuth (`/api/auth/*`); rewrites to Nest for app APIs |
+| **NestJS 11** | HTTP API — streaming chat, Prisma, execute-tool, wallets, conversations |
 | **Vercel AI SDK 4** | Streaming LLM orchestration with tool calling |
-| **viem 2** | Type-safe blockchain client with zkSync extensions |
-| **siwe** | Sign-In with Ethereum authentication |
+| **viem 2** | Type-safe Ethereum client (incl. zkSync extensions) |
+| **siwe** | Sign-In with Ethereum |
 | **NextAuth.js v5** | JWT session management |
-| **Prisma 6** | Type-safe ORM for PostgreSQL |
-| **Supabase** | Managed PostgreSQL database |
-| **Zod** | Runtime schema validation for tool parameters |
-| **React 19** | UI rendering engine |
+| **Prisma 6** | PostgreSQL ORM |
+| **Supabase** | Managed Postgres (typical deployment) |
+| **react-markdown** | Chat markdown rendering |
+| **Zod** | Tool parameter schemas |
+| **React 19** | UI |
 
 ---
 
@@ -520,10 +511,6 @@ No other code changes required. The agent loop auto-discovers registered tools.
 
 ## 📄 License
 
-MIT © [Hitman350](https://github.com/Hitman350)
-
-<br />
-
-**If Dimensity helped you, consider giving it a ⭐**
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
 
 </div>
